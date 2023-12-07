@@ -30,7 +30,7 @@ def card_search(command,output_file,force):
                 button_state=button_state_new
 
                 if button_state:
-                    pressed=pressed+1 #counter the number of time the button has been pressed
+                    pressed=pressed+1 #count the number of time the button has been pressed
 
             if pressed%2!=0:
                 led_pin.write(1) #If the script is running turn the led on
