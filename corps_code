@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+from pyfirmata import Arduino, util, STRING_DATA
+import time
+from output_grabber import OutputGrabber
+import pm3
+import subprocess
+import re
+import multiprocessing
+import sys
+import os
+import atexit
+
+def msg( text):
+    if text:
+        board.send_sysex( STRING_DATA, util.str_to_two_byte_iter( text ) )
+
+def connect_proxmark():
+
+    try:
+        p=pm3.pm3(port)
+    except:
+        print("Erreur lors de la tentative de connexion au proxmark\nSecond Essai ...")
+    return p
+
+def card_search(output_file):
+    print("Recherche de cartes ISO 14A\n")
+    t=pm3.pm3("bt:20:23:01:03:04:15")
+    while True:
+        sys.stdout = open(str(os.getpid()) + ".out", "w") #https://stackoverflow.com/questions/1501651/log-output-of-multiprocessing-process
+        out=OutputGrabber()
+        with out:
+            t.console("hf 14a info")
+        with open(output_file,'a') as f:
+            if '+' in out.capturedtext:
+                print("Carte trouvée :")
+                print(out.capturedtext)
+                f.write("Carte trouvée :\n")
+                f.write(f"Date : {time.ctime(time.time())}\n")
+                for line in out.capturedtext.split('\n'):
+                    if '+' in line:
+                        f.write(line + '\n')
+                f.write("\n"+"-"*150+"\n")
+                time.sleep(1)
+            else:
+                print("Recherche ...                               " , end="\r")
+
+
+def crack_key():
+    print("Essaie de trouver les clés ...")
+
+    try:
+        crack= subprocess.run(['/home/quentin/Documents/proxmark3/pm3','-c','hf mf autopwn','-p',port], stdout=subprocess.PIPE,timeout=20)
+        if crack.returncode==0:
+            pattern = r'(/[^\n]+\.bin)'
+            pattern2 = r'(/[^\n]+\.json)'
+            file_paths = re.findall(pattern, crack.stdout.decode('utf-8'))
+            file_paths2 = re.findall(pattern2, crack.stdout.decode('utf-8'))
+            result=f"Clé trouvée : {file_paths[0]}\nDump de la carte : {file_paths[1]},{file_paths2[0]}\n"
+            print(result)
+            with open(output_file,'a') as f:
+                f.write(result)
+        else:
+            print("Erreur n'a pas pu trouver les clés")
+    except subprocess.TimeoutExpired:
+        print("TimeOut")
+
+def count_button(board,count):
+
+    
+    button_pin = board.get_pin('d:2:i')
+    button_pin2=board.get_pin('d:4:i')
+    it = util.Iterator(board)
+    it.start()
+    mode=0
+    button_state=False
+    button_state2=False
+
+    while True:
+        try:
+
+            time.sleep(1.1)
+            button_new_state = button_pin.read()
+            button_new_state2=button_pin2.read()
+            print(button_new_state2)
+            print(button_new_state)
+            if button_state!=button_new_state:
+                if button_state==False:
+                    mode=mode+1
+                button_state=button_new_state
+            if button_state2!=button_new_state2:
+                if button_state2==False:
+                    mode=mode-1
+                button_state2=button_new_state2
+            count.value=mode            
+            msg(f"Mode  : {mode}")
+            print("Button State:", mode)
+        except KeyboardInterrupt:
+            msg("clear")
+            board.exit()
+
+
+if __name__=='__main__':
+
+    port="bt:20:23:01:03:04:15"
+    output_file="final.txt"
+    #p=connect_proxmark()
+    #print(p)
+    board = Arduino('/dev/ttyACM0')
+    shared_count = multiprocessing.Value('i', 0)
+    proc=multiprocessing.Process(target=count_button,args=(board,shared_count,))
+    proc.start()
+
+    while True:
+        try:
+            time.sleep(1)
+            print(f"bonjour {shared_count.value}")
+        except KeyboardInterrupt:
+            msg("clear")
+            board.exit()
+
+
+
+
+
+
+#PYTHONPATH=../../../pyscripts ./alors.py
+ #   for i in range(10):
+ #       msg(f"compteur: {str(i)}")
+ #       time.sleep(2)
+#
