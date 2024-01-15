@@ -1,71 +1,115 @@
-#!/usr/bin/env python3
-from pyfirmata import Arduino, util, STRING_DATA
+from pwn import *
 import time
-from output_grabber import OutputGrabber
-import pm3
-import subprocess
 import re
 import multiprocessing
-import sys
-import os
-import atexit
+from pyfirmata import Arduino, util, STRING_DATA
 
 def msg( text):
     if text:
         board.send_sysex( STRING_DATA, util.str_to_two_byte_iter( text ) )
 
-def connect_proxmark():
 
-    try:
-        p=pm3.pm3(port)
-    except:
-        print("Erreur lors de la tentative de connexion au proxmark\nSecond Essai ...")
+def handle_error_connect(port):
+    p=connect_proxmark(port)
+    while p==False:
+        print("Nouvelle Tentative de connexion")
+        time.sleep(5)
+        p=connect_proxmark(port)
     return p
 
-def card_search(output_file):
-    print("Recherche de cartes ISO 14A\n")
-    t=pm3.pm3("bt:20:23:01:03:04:15")
+def connect_proxmark(port):
+
+    p=process(['/home/quentin/proxmark3/pm3','-p',port])
+    recu=b""
+    while b'Communicating' not in recu:
+        recu=p.recvline(timeout=5)
+        print(recu)
+        if b'!!' in recu or b'?' in recu:
+            p.kill()
+            return False
+    print("Connecté")
+    return p
+
+
+
+def display_command(command,proc,timeout):
+    f=open('rrr.txt','a')
+    #print("bonjour")
+    proc.sendline(command)
+    recu=""
+    while recu!=b'':
+        recu=proc.recvline(timeout=timeout)
+        if b'+'  in recu or b'=' in recu :
+            print(recu)
+            f.write(recu.decode('utf-8'))
+            if b'saved' in recu:
+                s=recu.decode('utf-8')
+                pattern = r'(/[^\n]+\.bin)'
+                pattern2 = r'(/[^\n]+\.json)'
+                match=re.search(pattern,s)
+                if match:
+                    f.write(f"Dump format bin de la carte {match.group(1)}")
+                match2=re.search
+                match2=re.search(pattern2,s)
+                if match2:
+                    f.write(f"Dump format json de la carte {match2.group(1)}")
+        elif b'?' in recu:
+            f.write(recu.decode('utf-8'))
+            print(recu)
+            s=recu.decode('utf-8')
+            match=re.search(r'`([^`]+)`',s)
+            print(match)
+            if match and match.group(1)!='hf mf':
+                commande=match.group(1)
+                f.write(f'\n Running {commande}')
+                f.close()
+                display_command(commande.encode('utf-8'),proc,timeout=5)
+                f=open('rrr.txt','a')
+        elif b'!' in recu:
+            print(recu)
+            if b'[!!] Error: No response from Proxmark3' in recu:
+                print("Erreur de communication avec le proxmark")
+                print(recu)
+                
+                return False
+
+    f.write("\n"+"-"*150+"\n")
+    f.close()
+    return True
+
+
+
+def search_hf14a_cards(proc):
     while True:
-        sys.stdout = open(str(os.getpid()) + ".out", "w") #https://stackoverflow.com/questions/1501651/log-output-of-multiprocessing-process
-        out=OutputGrabber()
-        with out:
-            t.console("hf 14a info")
-        with open(output_file,'a') as f:
-            if '+' in out.capturedtext:
-                print("Carte trouvée :")
-                print(out.capturedtext)
-                f.write("Carte trouvée :\n")
-                f.write(f"Date : {time.ctime(time.time())}\n")
-                for line in out.capturedtext.split('\n'):
-                    if '+' in line:
-                        f.write(line + '\n')
-                f.write("\n"+"-"*150+"\n")
-                time.sleep(1)
-            else:
-                print("Recherche ...                               " , end="\r")
+        display_command(b'hf 14a info',proc,1)
 
+def crack_cards(proc):
+    while True:
+        try:
+            status=display_command(b'hf mf autopwn',proc,15)
+            if status==False:
+                port="bt:20:23:01:03:04:15"
+                proc=handle_error_connect(port)
+        except KeyboardInterrupt:
+            print("Sortie")
+            break
 
-def crack_key():
-    print("Essaie de trouver les clés ...")
+def clone_card(proc):
+    while True:
+        pattern = r'(/.*dump[^\n]+\.bin)'
+        with open('rrr.txt', 'r') as file:
+            content = file.read()
 
-    try:
-        crack= subprocess.run(['/home/quentin/Documents/proxmark3/pm3','-c','hf mf autopwn','-p',port], stdout=subprocess.PIPE,timeout=20)
-        if crack.returncode==0:
-            pattern = r'(/[^\n]+\.bin)'
-            pattern2 = r'(/[^\n]+\.json)'
-            file_paths = re.findall(pattern, crack.stdout.decode('utf-8'))
-            file_paths2 = re.findall(pattern2, crack.stdout.decode('utf-8'))
-            result=f"Clé trouvée : {file_paths[0]}\nDump de la carte : {file_paths[1]},{file_paths2[0]}\n"
-            print(result)
-            with open(output_file,'a') as f:
-                f.write(result)
+        matches = re.findall(pattern, content)
+
+        if matches:
+            last_match = matches[-1]
+            print("Copie de la carte:", last_match)
+            display_command(b'hf mf cload -f '+last_match.encode('utf-8'),proc,10)
         else:
-            print("Erreur n'a pas pu trouver les clés")
-    except subprocess.TimeoutExpired:
-        print("TimeOut")
+            print("Pas de dump de carte trouvée")
 
 def count_button(board,count):
-
     
     button_pin = board.get_pin('d:2:i')
     button_pin2=board.get_pin('d:4:i')
@@ -81,8 +125,8 @@ def count_button(board,count):
             time.sleep(1.1)
             button_new_state = button_pin.read()
             button_new_state2=button_pin2.read()
-            print(button_new_state2)
-            print(button_new_state)
+            #print(button_new_state2)
+            #print(button_new_state)
             if button_state!=button_new_state:
                 if button_state==False:
                     mode=mode+1
@@ -93,38 +137,56 @@ def count_button(board,count):
                 button_state2=button_new_state2
             count.value=mode            
             msg(f"Mode  : {mode}")
-            print("Button State:", mode)
+            #print("Button State:", mode)
         except KeyboardInterrupt:
             msg("clear")
             board.exit()
 
-
 if __name__=='__main__':
-
-    port="bt:20:23:01:03:04:15"
-    output_file="final.txt"
-    #p=connect_proxmark()
-    #print(p)
-    board = Arduino('/dev/ttyACM0')
+    board = Arduino('/dev/ttyACM1')
     shared_count = multiprocessing.Value('i', 0)
     proc=multiprocessing.Process(target=count_button,args=(board,shared_count,))
     proc.start()
+    port="bt:20:23:01:03:04:15"
+    p=handle_error_connect(port)
+    old_value=0
 
     while True:
-        try:
-            time.sleep(1)
-            print(f"bonjour {shared_count.value}")
-        except KeyboardInterrupt:
-            msg("clear")
-            board.exit()
 
+        if shared_count.value!=old_value :
 
+            if old_value!=0:
+                proc2.terminate()
+                proc2.join()
+            if shared_count.value==0:
+                print("Bonjour 0")
+            elif shared_count.value==1:
+                proc2=multiprocessing.Process(target=search_hf14a_cards,args=(p,))
+                proc2.start()
+                print("Bonjour 1")
+            elif shared_count.value==2:
+                proc2=multiprocessing.Process(target=crack_cards,args=(p,))
+                proc2.start()
+                print("Bonjour 2")
+            elif shared_count.value==3:
+                proc2=multiprocessing.Process(target=clone_card,args=(p,))
+                proc2.start()
+                print("Bonjour 3")
+        else:
+            print("les valeurs n'ont pas changé")
+        old_value=shared_count.value
+        time.sleep(1)
 
-
-
-
-#PYTHONPATH=../../../pyscripts ./alors.py
- #   for i in range(10):
- #       msg(f"compteur: {str(i)}")
- #       time.sleep(2)
+    #proc=multiprocessing.Process(target=clone_card,args=(p,))
+    #proc.start()
+    #time.sleep(30)
 #
+    #proc.terminate()
+    #proc.join()
+    #print("Terminé")
+#
+    #time.sleep(10)
+
+
+    #display_command(b'info',p,1)
+    #crack_cards(p)
