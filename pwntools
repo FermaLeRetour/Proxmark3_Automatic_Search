@@ -1,0 +1,127 @@
+from pwn import *
+import time
+import re
+import multiprocessing
+from pyfirmata import Arduino, util, STRING_DATA
+
+def msg( text):
+    if text:
+        board.send_sysex( STRING_DATA, util.str_to_two_byte_iter( text ) )
+
+
+def handle_error_connect(port):
+    p=connect_proxmark(port)
+    while p==False:
+        print("Nouvelle Tentative de connexion")
+        time.sleep(5)
+        p=connect_proxmark(port)
+    return p
+
+def connect_proxmark(port):
+
+    p=process(['/home/quentin/proxmark3/pm3','-p',port])
+    recu=b""
+    while b'Communicating' not in recu:
+        recu=p.recvline(timeout=5)
+        print(recu)
+        if b'!!' in recu or b'?' in recu:
+            p.kill()
+            return False
+    print("Connecté")
+    return p
+
+
+
+def display_command(command,proc,timeout):
+    f=open('rrr.txt','a')
+    proc.sendline(command)
+    recu=""
+    while recu!=b'':
+        recu=proc.recvline(timeout=timeout)
+        if b'+'  in recu or b'=' in recu :
+            print(recu)
+            f.write(recu.decode('utf-8'))
+        elif b'?' in recu:
+            f.write(recu.decode('utf-8'))
+            
+            print(recu)
+            s=recu.decode('utf-8')
+            match=re.search(r'Try `([^`]+)`',s)
+            if match:
+                commande=match.group(1)
+                f.write(f'\n Running {commande}')
+                f.close()
+                display_command(commande.encode('utf-8'),proc,timeout=5)
+                f=open('rrr.txt','a')
+        elif b'!' in recu:
+            print(recu)
+            if b'[!!] Error: No response from Proxmark3' in recu:
+                print("Erreur de communication avec le proxmark")
+                print(recu)
+                
+                return False
+
+    f.write("\n"+"-"*150+"\n")
+    f.close()
+    return True
+
+def search_hf14a_cards(proc):
+    while True:
+        display_command(b'hf 14a info',proc,1)
+
+def crack_cards(proc):
+    while True:
+        try:
+            status=display_command(b'hf mf autopwn',proc,15)
+            if status==False:
+                port="bt:20:23:01:03:04:15"
+                proc=handle_error_connect(port)
+        except KeyboardInterrupt:
+            print("Sortie")
+            break
+
+def count_button(board,count):
+
+    
+    button_pin = board.get_pin('d:2:i')
+    button_pin2=board.get_pin('d:4:i')
+    it = util.Iterator(board)
+    it.start()
+    mode=0
+    button_state=False
+    button_state2=False
+
+    while True:
+        try:
+
+            time.sleep(1.1)
+            button_new_state = button_pin.read()
+            button_new_state2=button_pin2.read()
+            print(button_new_state2)
+            print(button_new_state)
+            if button_state!=button_new_state:
+                if button_state==False:
+                    mode=mode+1
+                button_state=button_new_state
+            if button_state2!=button_new_state2:
+                if button_state2==False:
+                    mode=mode-1
+                button_state2=button_new_state2
+            count.value=mode            
+            msg(f"Mode  : {mode}")
+            print("Button State:", mode)
+        except KeyboardInterrupt:
+            msg("clear")
+            board.exit()
+
+if __name__=='__main__':
+    board = Arduino('/dev/ttyACM0')
+    shared_count = multiprocessing.Value('i', 0)
+    proc=multiprocessing.Process(target=count_button,args=(board,shared_count,))
+    proc.start()
+    port="bt:20:23:01:03:04:15"
+    p=handle_error_connect(port)
+    proc=multiprocessing.Process(target=display_command,args=(b'info',p,1,))
+    proc.start()
+    #display_command(b'info',p,1)
+    #crack_cards(p)
