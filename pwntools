@@ -3,6 +3,18 @@ import time
 import re
 import multiprocessing
 from pyfirmata import Arduino, util, STRING_DATA
+import socket
+
+def get_local_ip():
+    try:
+        # Create a socket object and connect to an external server (Google DNS in this case)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except socket.error:
+        return None
 
 def msg( text):
     if text:
@@ -10,6 +22,7 @@ def msg( text):
 
 
 def handle_error_connect(port):
+
     p=connect_proxmark(port)
     while p==False:
         print("Nouvelle Tentative de connexion")
@@ -33,55 +46,105 @@ def connect_proxmark(port):
 
 
 def display_command(command,proc,timeout):
+
+
     f=open('rrr.txt','a')
+    additional_command=[]
+    line= 0
     proc.sendline(command)
     recu=""
     while recu!=b'':
+
         recu=proc.recvline(timeout=timeout)
-        if b'+'  in recu or b'=' in recu :
+        if b'+'  in recu:
             print(recu)
             f.write(recu.decode('utf-8'))
+            line=line+1
+            pattern = r'(/.*dump[^\n]+\.bin)'
+            match=re.search(pattern,recu.decode('utf-8'))
+            if match:
+                msg("keyfound")
+            if b'[+] Card loaded' in recu:
+                #msg("copiee")
+                a=1
         elif b'?' in recu:
             f.write(recu.decode('utf-8'))
-            
             print(recu)
             s=recu.decode('utf-8')
-            match=re.search(r'Try `([^`]+)`',s)
-            if match:
+            match=re.search(r'`([^`]+)`',s)
+            
+            if match and match.group(1)!='hf mf':
                 commande=match.group(1)
-                f.write(f'\n Running {commande}')
-                f.close()
-                display_command(commande.encode('utf-8'),proc,timeout=5)
-                f=open('rrr.txt','a')
+                additional_command.append(commande)
+
         elif b'!' in recu:
             print(recu)
-            if b'[!!] Error: No response from Proxmark3' in recu:
+            if  b'[!] Communicating with Proxmark3 device failed' in recu:
                 print("Erreur de communication avec le proxmark")
                 print(recu)
                 
                 return False
-
-    f.write("\n"+"-"*150+"\n")
+        
+    if line!=0 and line!=1:
+        if len(additional_command)!=0:
+            for commande in additional_command:
+                f.write(f'\n Running {commande}')
+                f.close()
+                display_command(commande.encode('utf-8'),proc,timeout=5)
+                f=open('rrr.txt','a')
+        f.write(f"Date : {time.ctime(time.time())}\n")
+        f.write("\n"+"-"*150+"\n")
+        print("\n"+"-"*150+"\n")
     f.close()
     return True
 
+
+
 def search_hf14a_cards(proc):
     while True:
-        display_command(b'hf 14a info',proc,1)
+        
+        status=display_command(b'hf 14a info',proc,1)
+        if status==False:
+                port="bt:20:23:01:03:04:15"
+                proc=handle_error_connect(port)
+
+    
+
 
 def crack_cards(proc):
     while True:
         try:
+            msg("mode2")
             status=display_command(b'hf mf autopwn',proc,15)
             if status==False:
                 port="bt:20:23:01:03:04:15"
                 proc=handle_error_connect(port)
+
         except KeyboardInterrupt:
             print("Sortie")
             break
 
-def count_button(board,count):
+def clone_card(proc):
+    while True:
+        msg("mode3")
 
+        pattern = r'(/.*dump[^\n]+\.bin)'
+        with open('rrr.txt', 'r') as file:
+            content = file.read()
+
+        matches = re.findall(pattern, content)
+
+        if matches:
+            last_match = matches[-1]
+            print("Copie de la carte:", last_match)
+            status=display_command(b'hf mf cload -f '+last_match.encode('utf-8'),proc,10)
+            if status==False:
+                port="bt:20:23:01:03:04:15"
+                proc=handle_error_connect(port)
+        else:
+            print("Pas de dump de carte trouvée")
+
+def count_button(board,count):
     
     button_pin = board.get_pin('d:2:i')
     button_pin2=board.get_pin('d:4:i')
@@ -97,8 +160,8 @@ def count_button(board,count):
             time.sleep(1.1)
             button_new_state = button_pin.read()
             button_new_state2=button_pin2.read()
-            print(button_new_state2)
-            print(button_new_state)
+            #print(button_new_state2)
+            #print(button_new_state)
             if button_state!=button_new_state:
                 if button_state==False:
                     mode=mode+1
@@ -107,9 +170,11 @@ def count_button(board,count):
                 if button_state2==False:
                     mode=mode-1
                 button_state2=button_new_state2
+            if mode>3:
+                mode=mode-4
+            if mode<0:
+                mode=mode+4
             count.value=mode            
-            msg(f"Mode  : {mode}")
-            print("Button State:", mode)
         except KeyboardInterrupt:
             msg("clear")
             board.exit()
@@ -117,11 +182,47 @@ def count_button(board,count):
 if __name__=='__main__':
     board = Arduino('/dev/ttyACM0')
     shared_count = multiprocessing.Value('i', 0)
+    exit_event=multiprocessing.Event()
     proc=multiprocessing.Process(target=count_button,args=(board,shared_count,))
     proc.start()
     port="bt:20:23:01:03:04:15"
     p=handle_error_connect(port)
-    proc=multiprocessing.Process(target=display_command,args=(b'info',p,1,))
-    proc.start()
-    #display_command(b'info',p,1)
-    #crack_cards(p)
+    old_value=0
+    msg("menu")
+    ip=get_local_ip()
+    print(f"IP ; {ip}")
+    msg(f"IP:{ip}")
+    while True:
+
+        if shared_count.value!=old_value :
+
+            if old_value!=0:
+                print("Terminé le Process")
+                proc2.terminate()
+                proc2.join()
+
+
+
+            if shared_count.value==0:
+                msg("menu")
+                ip=get_local_ip()
+                msg(f"IP:{ip}")
+
+
+            elif shared_count.value==1:
+                proc2=multiprocessing.Process(target=search_hf14a_cards,args=(p,))
+                proc2.start()
+                msg("mode1")
+            elif shared_count.value==2:
+                proc2=multiprocessing.Process(target=crack_cards,args=(p,))
+                proc2.start()
+            elif shared_count.value==3:
+                proc2=multiprocessing.Process(target=clone_card,args=(p,))
+                proc2.start()
+        else:
+
+            a=2
+        old_value=shared_count.value
+        time.sleep(1)
+
+
