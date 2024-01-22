@@ -176,7 +176,7 @@ def count_button(board,count):
             #print(button_new_state)
             if button_state!=button_new_state:
                 if button_state==False:
-                    mode=mode+1
+                    mode=mode-1
                 button_state=button_new_state
             if button_state2!=button_new_state2:
                 if button_state2==False:
