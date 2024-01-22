@@ -269,20 +269,21 @@ void stringDataCallback(char *stringData){
 
     
     
-    if (strcmp(stringData,"menu")==0){
+    if (strcmp(stringData,"copied")==0){
         display.clearDisplay();
         display.setCursor(0,0);
-        display.println("MENU");
-        display.println("1) HF14A cards info");
-        display.println("2) Dump keys card");
-        display.println("3) Copy dump to card");
-        
+        display.println("Mode 3 : COPY");
+        display.println("");
+        display.println("Carte copiee");
         display.display();
+        delay(5000);
     }
     else if (strcmp(stringData,"mode1")==0){
         display.clearDisplay();
         display.setCursor(0,0);
         display.println("Mode 1 : SEARCH");
+        display.println("");
+        display.println("Recherche ...");
         display.display();
       
     }
@@ -291,7 +292,7 @@ void stringDataCallback(char *stringData){
         display.setCursor(0,0);
         display.println("Mode 2 : CRACK");
         display.println("");
-        display.println("Pas de dump de carte");
+        display.println("En cours ...");
         display.display();
       
     }
@@ -300,7 +301,7 @@ void stringDataCallback(char *stringData){
         display.setCursor(0,0);
         display.println("Mode 3 : COPY");
         display.println("");
-        display.println("Pas de carte copiée");
+        display.println("En cours ...");
         display.display();
       
     } else if (strcmp(stringData,"keyfound")==0){
@@ -310,17 +311,28 @@ void stringDataCallback(char *stringData){
         display.println("");
         display.println("Carte dumpee");
         display.display();
+        delay(5000);
     }
-    else if (strstr(stringData,"IP") !=nullptr){
-        display.setCursor(26,0);
-        display.print(stringData);
+  else if (strcmp(stringData,"error_no_dump")==0){
+        display.clearDisplay();
+        display.setCursor(0,0);
+        display.println("Mode 3 : COPY");
+        display.println("");
+        display.println("Error : No dump");
         display.display();
+        delay(5000);
+      }
 
-    }else{
+    else{
          display.clearDisplay();
         display.setCursor(0,0);
+        display.print("MENU ");
         display.println(stringData);
+        display.println("1)Search");
+        display.println("2)Dump");
+        display.println("3)Copy");
         display.display();
+
     }
 
 }
