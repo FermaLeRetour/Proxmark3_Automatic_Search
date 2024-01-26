@@ -34,8 +34,8 @@ def handle_error_connect(port):
     return p
 
 def connect_proxmark(port):
-    
-    #p=process(['/home/quentin/proxmark3/pm3','-p',port])
+
+    #p=process(['/home/quentin/Documents/proxmark3/pm3','-p',port])
     p=process(['/home/quentin/proxmark3/pm3'])
     recu=b""
     while b'Communicating' not in recu:
@@ -47,7 +47,12 @@ def connect_proxmark(port):
     print("Connecté")
     return p
 
-
+def display_msg(displ,timeout):
+    message.value=1
+    time.sleep(2)
+    msg(displ)
+    time.sleep(timeout)
+    message.value=0
 
 def display_command(command,proc,timeout):
 
@@ -60,7 +65,7 @@ def display_command(command,proc,timeout):
     while recu!=b'':
 
         recu=proc.recvline(timeout=timeout)
-        if b'+'  in recu:
+        if b'+'  in recu or b'=' in recu:
             print(recu)
             f.write(recu.decode('utf-8'))
             d=recu.decode('utf-8')
@@ -68,33 +73,54 @@ def display_command(command,proc,timeout):
             pattern = r'(/.*dump[^\n]+\.bin)'
             match=re.search(pattern,d)
             if match and b'loaded' not in recu:
-                msg("keyfound")
+                display_msg("Crack\nDump effectuee",2)
             if b'[+] Card loaded' in recu:
-                msg("copied")
+                display_msg("Copy\nCarte copiee")
+            if b'MIFARE' in recu:
+                d=d.replace(" ","").replace("[","").replace("]","").replace("+","")
+                #message.value=1
+                #time.sleep(2)
+                #print(d)
+                #msg(f"Search\n{d}")
+                #time.sleep(2)
+                #message.value=0
+                display_msg(f"Search\n{d}",2)
         elif b'?' in recu:
             f.write(recu.decode('utf-8'))
             print(recu)
             s=recu.decode('utf-8')
             match=re.search(r'`([^`]+)`',s)
-            
+
             if match and match.group(1)!='hf mf':
                 commande=match.group(1)
                 additional_command.append(commande)
+            if b'[?] Hint: Try some distance or position of the card\n' in recu:
+                display_msg("Try some distance",2)
 
         elif b'!' in recu:
             print(recu)
             if  b'[!] Communicating with Proxmark3 device failed' in recu:
                 print("Erreur de communication avec le proxmark")
                 print(recu)
-                
                 return False
-        
+            if b"[!] Can't set magic card block" in recu:
+                display_msg("\nPas Magic Card detectee",2)
+                #message.value=1
+                #time.sleep(2)
+                #msg("Erreur\nPas de carte\nPas Magic Card")
+                #time.sleep(2)
+                #message.value=0
+
     if line!=0 and line!=1:
         if len(additional_command)!=0:
             for commande in additional_command:
                 f.write(f'\n Running {commande}')
+                print(f"\nRunning {commande}")
                 f.close()
-                display_command(commande.encode('utf-8'),proc,timeout=5)
+                try:
+                    display_command(commande.encode('utf-8'),proc,timeout=5)
+                except:
+                    print("Error")
                 f=open('result_file','a')
         f.write(f"Date : {time.ctime(time.time())}\n")
         f.write("\n"+"-"*150+"\n")
@@ -107,9 +133,9 @@ def display_command(command,proc,timeout):
 def search_hf14a_cards(proc,):
     status=True
     while status:
-        
+
         status=display_command(b'hf 14a info',proc,1)
- 
+
     connect_error.value=1
     proc.terminate()
                 #result_queue.put(True)
@@ -157,9 +183,9 @@ def clone_card(proc):
     proc.terminate()
 
 def count_button(board,count):
-    
-    button_pin = board.get_pin('d:2:i')
-    button_pin2=board.get_pin('d:4:i')
+
+    button_pin = board.get_pin('d:8:i')
+    button_pin2=board.get_pin('d:7:i')
     it = util.Iterator(board)
     it.start()
     mode=0
@@ -168,36 +194,43 @@ def count_button(board,count):
 
     while True:
         try:
+            if message.value==0:
+                time.sleep(1.1)
+                button_new_state = button_pin.read()
+                button_new_state2=button_pin2.read()
+                #print(button_new_state2)
+                #print(button_new_state)
+                if button_state!=button_new_state:
+                    if button_state==False:
+                        mode=mode+1
+                    button_state=button_new_state
+                if button_state2!=button_new_state2:
+                    if button_state2==False:
+                        mode=mode-1
+                    button_state2=button_new_state2
+                if mode>nb_mode:
+                    mode=mode-nb_mode-1
 
-            time.sleep(1.1)
-            button_new_state = button_pin.read()
-            button_new_state2=button_pin2.read()
-            #print(button_new_state2)
-            #print(button_new_state)
-            if button_state!=button_new_state:
-                if button_state==False:
-                    mode=mode-1
-                button_state=button_new_state
-            if button_state2!=button_new_state2:
-                if button_state2==False:
-                    mode=mode-1
-                button_state2=button_new_state2
-            if mode>nb_mode:
-                mode=mode-nb_mode+1
-            elif mode<0:
-                mode=mode+nb_mode+1
-            elif mode==0:
-                #msg("menu")
-                ip=get_local_ip()
-                #print(f"IP ; {ip}")
-                msg(ip)
-            elif mode==1:
-                msg("mode1")
-            elif mode==2:
-                msg("mode2")
-            elif mode==3:
-                msg("mode3")
-            count.value=mode            
+                elif mode<0:
+                    mode=mode+nb_mode+1
+
+                if mode==0:
+                    #msg("menu")
+                    ip=get_local_ip()
+                    #print(f"IP ; {ip}")
+                    #board.send_sysex( STRING_DATA, util.str_to_two_byte_iter( f"MENU {ip} \nSearch\nCrack\nClone" ) )
+                    msg(f"MENU\n1)Search\n2)Crack\n3)Clone")
+                    if ip:
+                        time.sleep(1)
+                        msg(f"IP : {ip}")
+                elif mode==1:
+                    msg("Search\nRecherche ...")
+                elif mode==2:
+                    msg("Crack\nEn Cours ...")
+                elif mode==3:
+                    msg("Clone\nEn Cours ...")
+                count.value=mode
+            
         except KeyboardInterrupt:
             board.exit()
 
@@ -208,6 +241,7 @@ if __name__=='__main__':
     #result_queue = multiprocessing.Queue()
     shared_count = multiprocessing.Value('i', 0)
     connect_error=multiprocessing.Value('i',0)
+    message=multiprocessing.Value('i',0)
     proc=multiprocessing.Process(target=count_button,args=(board,shared_count,))
     proc.start()
     port="bt:20:23:01:03:04:15"
@@ -224,7 +258,7 @@ if __name__=='__main__':
             connect_error.value=0
             old_value=-1
         if shared_count.value!=old_value :
-            
+
 
             if old_value!=0:
                 print("Terminé le Process")
