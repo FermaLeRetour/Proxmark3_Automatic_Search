@@ -36,7 +36,7 @@ def handle_error_connect(port):
 def connect_proxmark(port):
 
     #p=process(['/home/quentin/Documents/proxmark3/pm3','-p',port])
-    p=process(['/home/quentin/proxmark3/pm3'])
+    p=process(['/home/quentin/Documents/proxmark3/pm3'])
     recu=b""
     while b'Communicating' not in recu:
         recu=p.recvline(timeout=5)
