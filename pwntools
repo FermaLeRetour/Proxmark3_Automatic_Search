@@ -75,7 +75,7 @@ def display_command(command,proc,timeout):
             if match and b'loaded' not in recu:
                 display_msg("Crack\nDump effectuee",2)
             if b'[+] Card loaded' in recu:
-                display_msg("Copy\nCarte copiee")
+                display_msg("Copy\nCarte copiee",2)
             if b'MIFARE' in recu:
                 d=d.replace(" ","").replace("[","").replace("]","").replace("+","")
                 #message.value=1
